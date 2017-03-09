@@ -1354,6 +1354,35 @@ Related options:
 ),
 ]
 
+libvirt_volume_lustre_opts = [
+    cfg.StrOpt('lustre_mount_point_base',
+               default=paths.state_path_def('mnt'),
+               help="""
+Directory where the Lustre filesystems are mounted on the compute node.
+The default is 'mnt' directory of the location where nova's Python module
+is installed.
+
+Lustre provides shared storage for the OpenStack Block Storage service.
+
+Possible values:
+
+* A string representing absolute path of mount point.
+"""),
+    cfg.StrOpt('lustre_mount_options',
+               help="""
+Mount options passed to the Lustre client. See mount.lustre man page
+for details.
+
+Mount options controls the way the filesystem is mounted and how the
+Lustre client behaves when accessing files on this mount point.
+
+Possible values:
+
+* Any string representing mount options separated by commas.
+* Example string: flock,user_xattr
+"""),
+]
+
 
 # The queue size requires value to be a power of two from [256, 1024]
 # range.
@@ -1443,6 +1472,7 @@ ALL_OPTS = list(itertools.chain(
     libvirt_volume_smbfs_opts,
     libvirt_remotefs_opts,
     libvirt_volume_vzstorage_opts,
+    libvirt_volume_lustre_opts,
     libvirt_virtio_queue_sizes,
     libvirt_volume_nvmeof_opts,
     libvirt_pmem_opts,

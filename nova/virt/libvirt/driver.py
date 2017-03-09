@@ -190,6 +190,8 @@ libvirt_volume_drivers = [
     'disco=nova.virt.libvirt.volume.disco.LibvirtDISCOVolumeDriver',
     'vzstorage='
         'nova.virt.libvirt.volume.vzstorage.LibvirtVZStorageVolumeDriver',
+    'lustre='
+        'nova.virt.libvirt.volume.lustre.LibvirtLustreVolumeDriver',
     'veritas_hyperscale='
         'nova.virt.libvirt.volume.vrtshyperscale.'
         'LibvirtHyperScaleVolumeDriver',
@@ -2747,7 +2749,7 @@ class LibvirtDriver(driver.ComputeDriver):
             # gluster was removed in the 16.0.0 Pike release. It is unclear,
             # however, if other volume drivers rely on the netfs disk source
             # protocol.
-            elif disk_info['source_protocol'] == 'netfs':
+            elif disk_info['source_protocol'] in ('lustre', 'netfs'):
                 network_disks_to_snap.append((disk_info, new_file))
 
         if not disks_to_snap and not network_disks_to_snap:

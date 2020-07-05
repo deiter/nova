@@ -16,7 +16,7 @@ from oslo_log import log as logging
 import six
 
 import nova.conf
-from nova.i18n import _LE, _LW
+from nova.i18n import _
 from nova import utils
 from nova.virt.libvirt import utils as libvirt_utils
 from nova.virt.libvirt.volume import fs
@@ -77,7 +77,7 @@ class LibvirtLustreVolumeDriver(fs.LibvirtBaseFileSystemVolumeDriver):
             if 'target is busy' in six.text_type(exc):
                 LOG.debug("The Lustre share %s is still in use.", export)
             else:
-                LOG.exception(_LE("Couldn't unmount the Lustre share %s"),
+                LOG.exception(_("Couldn't unmount the Lustre share %s"),
                               export)
 
     def _ensure_mounted(self, connection_info):
@@ -105,6 +105,7 @@ class LibvirtLustreVolumeDriver(fs.LibvirtBaseFileSystemVolumeDriver):
             utils.execute(*lustre_cmd, run_as_root=True)
         except processutils.ProcessExecutionError as exc:
             if ensure and 'already mounted' in six.text_type(exc):
-                LOG.warning(_LW("%s is already mounted"), lustre_share)
+                LOG.warning(_("Lustre share %s is already mounted"),
+                            lustre_share)
             else:
                 raise

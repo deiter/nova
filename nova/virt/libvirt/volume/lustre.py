@@ -56,7 +56,7 @@ class LibvirtLustreVolumeDriver(fs.LibvirtBaseFileSystemVolumeDriver):
 
         return conf
 
-    def connect_volume(self, connection_info, disk_info, instance):
+    def connect_volume(self, connection_info, instance):
         if 'lustre' not in CONF.libvirt.qemu_allowed_storage_drivers:
             self._ensure_mounted(connection_info)
             connection_info['data']['device_path'] = \

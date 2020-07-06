@@ -12,6 +12,7 @@
 
 import errno
 
+from oslo_concurrency import lockutils
 from oslo_concurrency import processutils
 from oslo_log import log as logging
 from oslo_utils import fileutils
@@ -47,34 +48,40 @@ class LibvirtLustreVolumeDriver(fs.LibvirtBaseFileSystemVolumeDriver):
         return conf
 
     def connect_volume(self, connection_info, instance):
+        export_type = connection_info['driver_volume_type']
         data = connection_info['data']
-        lustre_share = data['export']
+        export_path = data['export']
         mount_path = self._get_mount_path(connection_info)
-        if not libvirt_utils.is_mounted(mount_path, lustre_share):
-            options = []
-            conf_options = CONF.libvirt.lustre_mount_options
-            if conf_options:
-                options.extend(['-o', conf_options])
-            data_options = data.get('options')
-            if data_options:
-                options.extend(data_options.split())
-            try:
-                remotefs.mount_share(mount_path, lustre_share,
-                                     'lustre', options=options)
-            except processutils.ProcessExecutionError as exp:
-                if exp.exit_code == errno.EEXIST:
-                    LOG.warning(exp.stderr)
-                else:
-                    raise
-        device_path = self._get_device_path(connection_info)
-        data['device_path'] = device_path
+        with lockutils.lock(mount_path, lock_file_prefix=export_type):
+            if not libvirt_utils.is_mounted(mount_path, export_path):
+                options = []
+                conf_options = CONF.libvirt.lustre_mount_options
+                if conf_options:
+                    options.extend(['-o', conf_options])
+                data_options = data.get('options')
+                if data_options:
+                    options.extend(data_options.split())
+                try:
+                    remotefs.mount_share(mount_path, export_path,
+                                         export_type, options=options)
+                except processutils.ProcessExecutionError as exp:
+                    if exp.exit_code == errno.EEXIST:
+                        LOG.warning(exp.stderr)
+                    else:
+                        raise
+            device_path = self._get_device_path(connection_info)
+            data['device_path'] = device_path
 
     def disconnect_volume(self, connection_info, instance):
         """Disconnect the volume."""
 
-        lustre_share = connection_info['data']['export']
+        export_type = connection_info['driver_volume_type']
+        data = connection_info['data']
+        export_path = data['export']
         mount_path = self._get_mount_path(connection_info)
-        remotefs.unmount_share(mount_path, lustre_share)
+        with lockutils.lock(mount_path, lock_file_prefix=export_type):
+            if libvirt_utils.is_mounted(mount_path, export_path):
+                remotefs.unmount_share(mount_path, export_path)
 
     def _ensure_mounted(self, connection_info):
         """@type connection_info: dict

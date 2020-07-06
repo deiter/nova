@@ -10,16 +10,20 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import errno
 
 from oslo_concurrency import processutils
 from oslo_log import log as logging
+from oslo_utils import fileutils
 import six
 
 import nova.conf
+import nova.privsep.fs
 from nova.i18n import _
 from nova import utils
 from nova.virt.libvirt import utils as libvirt_utils
 from nova.virt.libvirt.volume import fs
+from nova.virt.libvirt.volume import remotefs
 
 CONF = nova.conf.CONF
 
@@ -43,9 +47,27 @@ class LibvirtLustreVolumeDriver(fs.LibvirtBaseFileSystemVolumeDriver):
         return conf
 
     def connect_volume(self, connection_info, instance):
-        self._ensure_mounted(connection_info)
-        connection_info['data']['device_path'] = \
-            self._get_device_path(connection_info)
+        data = connection_info['data']
+        lustre_share = data['export']
+        mount_path = self._get_mount_path(connection_info)
+        if not libvirt_utils.is_mounted(mount_path, lustre_share):
+            options = []
+            conf_options = CONF.libvirt.lustre_mount_options
+            if conf_options:
+                options.extend(['-o', conf_options])
+            data_options = data.get('options')
+            if data_options:
+                options.extend(data_options.split())
+            try:
+                remotefs.mount_share(mount_path, lustre_share,
+                                     'lustre', options=options)
+            except processutils.ProcessExecutionError as exp:
+                if exp.exit_code == errno.EEXIST:
+                    LOG.warning(exp.stderr)
+                else:
+                    raise
+        device_path = self._get_device_path(connection_info)
+        data['device_path'] = device_path
 
     def disconnect_volume(self, connection_info, disk_dev, instance):
         """Disconnect the volume."""
@@ -53,7 +75,7 @@ class LibvirtLustreVolumeDriver(fs.LibvirtBaseFileSystemVolumeDriver):
         mount_path = self._get_mount_path(connection_info)
 
         try:
-            utils.execute('umount', mount_path, run_as_root=True)
+            nova.privsep.fs.umount(mount_path)
         except processutils.ProcessExecutionError as exc:
             export = connection_info['data']['export']
             if 'target is busy' in six.text_type(exc):
@@ -76,7 +98,7 @@ class LibvirtLustreVolumeDriver(fs.LibvirtBaseFileSystemVolumeDriver):
     def _mount_lustre(self, mount_path, lustre_share,
                          options=None, ensure=False):
         """Mount lustre export to mount path."""
-        utils.execute('mkdir', '-p', mount_path)
+        fileutils.ensure_tree(mount_path)
 
         lustre_cmd = ['mount', '-t', 'lustre']
         if options is not None:
@@ -85,6 +107,7 @@ class LibvirtLustreVolumeDriver(fs.LibvirtBaseFileSystemVolumeDriver):
 
         try:
             utils.execute(*lustre_cmd, run_as_root=True)
+            #nova.privsep.fs.mount(export_type, export_path, mount_path, options)
         except processutils.ProcessExecutionError as exc:
             if ensure and 'already mounted' in six.text_type(exc):
                 LOG.warning(_("Lustre share %s is already mounted"),

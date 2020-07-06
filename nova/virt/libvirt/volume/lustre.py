@@ -69,20 +69,12 @@ class LibvirtLustreVolumeDriver(fs.LibvirtBaseFileSystemVolumeDriver):
         device_path = self._get_device_path(connection_info)
         data['device_path'] = device_path
 
-    def disconnect_volume(self, connection_info, disk_dev, instance):
+    def disconnect_volume(self, connection_info, instance):
         """Disconnect the volume."""
 
+        lustre_share = connection_info['data']['export']
         mount_path = self._get_mount_path(connection_info)
-
-        try:
-            nova.privsep.fs.umount(mount_path)
-        except processutils.ProcessExecutionError as exc:
-            export = connection_info['data']['export']
-            if 'target is busy' in six.text_type(exc):
-                LOG.debug("The Lustre share %s is still in use.", export)
-            else:
-                LOG.exception(_("Couldn't unmount the Lustre share %s"),
-                              export)
+        remotefs.unmount_share(mount_path, lustre_share)
 
     def _ensure_mounted(self, connection_info):
         """@type connection_info: dict

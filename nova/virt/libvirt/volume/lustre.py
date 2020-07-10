@@ -11,16 +11,14 @@
 #    under the License.
 
 import errno
+import os
 
 from oslo_concurrency import lockutils
 from oslo_concurrency import processutils
 from oslo_log import log as logging
-from oslo_utils import fileutils
-import six
 
 import nova.conf
 import nova.privsep.fs
-from nova.i18n import _
 from nova import utils
 from nova.virt.libvirt import utils as libvirt_utils
 from nova.virt.libvirt.volume import fs
@@ -35,7 +33,39 @@ class LibvirtLustreVolumeDriver(fs.LibvirtBaseFileSystemVolumeDriver):
     """Class implements libvirt part of volume driver for Lustre."""
 
     def _get_mount_point_base(self):
+        """Return the mount point path prefix.
+
+        This is used to build the device path.
+
+        :returns: The mount point path prefix.
+        """
         return CONF.libvirt.lustre_mount_point_base
+
+    def _get_mount_path(self, connection_info):
+        """Returns the mount path prefix using the mount point base and share.
+
+        :param connection_info: dict of the form
+
+        ::
+
+          connection_info = {
+              'data': {
+                  'export': the file system share,
+                  ...
+              }
+              ...
+          }
+
+        :returns: The mount path prefix.
+        """
+        data = connection_info['data']
+        name = data['name']
+        export = data['export']
+        share = self._normalize_export(export)
+        path = os.path.join(share, name)
+        base = self._get_mount_point_base()
+        digest = utils.get_hash_str(path)
+        return os.path.join(base, digest)
 
     def get_config(self, connection_info, disk_info):
         """Returns xml for libvirt."""
@@ -45,22 +75,18 @@ class LibvirtLustreVolumeDriver(fs.LibvirtBaseFileSystemVolumeDriver):
         conf.source_type = 'file'
         conf.source_path = data['device_path']
         conf.driver_format = data.get('format', 'raw')
+        conf.driver_io = "native"
         return conf
 
     def connect_volume(self, connection_info, instance):
+        """Connect the volume."""
         export_type = connection_info['driver_volume_type']
         data = connection_info['data']
         export_path = data['export']
         mount_path = self._get_mount_path(connection_info)
         with lockutils.lock(mount_path, lock_file_prefix=export_type):
             if not libvirt_utils.is_mounted(mount_path, export_path):
-                options = []
-                conf_options = CONF.libvirt.lustre_mount_options
-                if conf_options:
-                    options.extend(['-o', conf_options])
-                data_options = data.get('options')
-                if data_options:
-                    options.extend(data_options.split())
+                options = self._mount_options(connection_info)
                 try:
                     remotefs.mount_share(mount_path, export_path,
                                          export_type, options=options)
@@ -74,7 +100,6 @@ class LibvirtLustreVolumeDriver(fs.LibvirtBaseFileSystemVolumeDriver):
 
     def disconnect_volume(self, connection_info, instance):
         """Disconnect the volume."""
-
         export_type = connection_info['driver_volume_type']
         data = connection_info['data']
         export_path = data['export']
@@ -83,33 +108,15 @@ class LibvirtLustreVolumeDriver(fs.LibvirtBaseFileSystemVolumeDriver):
             if libvirt_utils.is_mounted(mount_path, export_path):
                 remotefs.unmount_share(mount_path, export_path)
 
-    def _ensure_mounted(self, connection_info):
-        """@type connection_info: dict
+    def _mount_options(self, connection_info):
+        """Return a list of additional arguments to pass to the mount command.
         """
-        lustre_export = connection_info['data']['export']
-        mount_path = self._get_mount_path(connection_info)
-        if not libvirt_utils.is_mounted(mount_path, lustre_export):
-            options = connection_info['data'].get('options')
-            self._mount_lustre(mount_path, lustre_export,
-                                  options, ensure=True)
-        return mount_path
-
-    def _mount_lustre(self, mount_path, lustre_share,
-                         options=None, ensure=False):
-        """Mount lustre export to mount path."""
-        fileutils.ensure_tree(mount_path)
-
-        lustre_cmd = ['mount', '-t', 'lustre']
-        if options is not None:
-            lustre_cmd.extend(options.split(' '))
-        lustre_cmd.extend([lustre_share, mount_path])
-
-        try:
-            utils.execute(*lustre_cmd, run_as_root=True)
-            #nova.privsep.fs.mount(export_type, export_path, mount_path, options)
-        except processutils.ProcessExecutionError as exc:
-            if ensure and 'already mounted' in six.text_type(exc):
-                LOG.warning(_("Lustre share %s is already mounted"),
-                            lustre_share)
-            else:
-                raise
+        options = []
+        data = connection_info['data']
+        conf_options = CONF.libvirt.lustre_mount_options
+        if conf_options:
+            options.extend(['-o', conf_options])
+        data_options = data.get('options')
+        if data_options:
+            options.extend(data_options.split())
+        return options
